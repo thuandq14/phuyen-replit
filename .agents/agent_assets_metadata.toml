@@ -1,0 +1,67 @@
+uploads = []
+
+[[generated]]
+id = "9XLSI8yHy1N10yY1kmgWX"
+uri = "file://artifacts/phu-yen-realty/public/images/hero.png"
+type = "image"
+title = "Cinematic hero oceanfront villa"
+
+[[generated]]
+id = "bCoVltwCb1CX5FZhs8GIi"
+uri = "file://artifacts/phu-yen-realty/public/images/prop-1.png"
+type = "image"
+title = "Oceanfront villa exterior"
+
+[[generated]]
+id = "Cw2XjmwiRP3YfhY79QtzN"
+uri = "file://artifacts/phu-yen-realty/public/images/prop-2.png"
+type = "image"
+title = "Balcony with sea view"
+
+[[generated]]
+id = "w_VUzdo18XOJYq4SGV6i6"
+uri = "file://artifacts/phu-yen-realty/public/images/prop-3.png"
+type = "image"
+title = "Beachfront property path"
+
+[[generated]]
+id = "LlxDYh33THSX132pPfyHi"
+uri = "file://artifacts/phu-yen-realty/public/images/prop-4.png"
+type = "image"
+title = "Lagoon view home"
+
+[[generated]]
+id = "s-vx9B_DYqg5Z9ptjJHQA"
+uri = "file://artifacts/phu-yen-realty/public/images/prop-5.png"
+type = "image"
+title = "Coastline modern architecture"
+
+[[generated]]
+id = "cYJa7VQ-P8OUnWo2A3dlz"
+uri = "file://artifacts/phu-yen-realty/public/images/prop-6.png"
+type = "image"
+title = "Cliffside premium villa"
+
+[[generated]]
+id = "1Qqs8gZ0F6D1yhOc6ene3"
+uri = "file://artifacts/phu-yen-realty/public/images/prop-7.png"
+type = "image"
+title = "Modern living room ocean view"
+
+[[generated]]
+id = "dDMUBNKF_T0T2oLlnxF9g"
+uri = "file://artifacts/phu-yen-realty/public/images/prop-8.png"
+type = "image"
+title = "Rooftop infinity pool"
+
+[[generated]]
+id = "fe7JXbRMvpf6uKUiR2BNP"
+uri = "file://artifacts/phu-yen-realty/public/images/prop-9.png"
+type = "image"
+title = "Tropical garden villa"
+
+[[outputs]]
+id = "-bYIyG2VfS6sUqe1tXPw6"
+uri = "file://phu-yen-realty.zip"
+type = "unspecified"
+title = "Phú Yên Realty - Source Code"

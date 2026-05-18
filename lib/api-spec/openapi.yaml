@@ -1,0 +1,244 @@
+openapi: 3.1.0
+info:
+  # Do not change the title, if the title changes, the import paths will be broken
+  title: Api
+  version: 0.1.0
+  description: API specification
+servers:
+  - url: /api
+    description: Base API path
+tags:
+  - name: health
+    description: Health operations
+  - name: contact
+    description: Contact form operations
+  - name: properties
+    description: Property listing operations
+paths:
+  /healthz:
+    get:
+      operationId: healthCheck
+      tags: [health]
+      summary: Health check
+      description: Returns server health status
+      responses:
+        "200":
+          description: Healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+
+  /contact:
+    post:
+      operationId: submitContact
+      tags: [contact]
+      summary: Submit contact form
+      description: Sends a contact inquiry to the sales manager
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ContactInput"
+      responses:
+        "201":
+          description: Contact submitted successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContactResponse"
+        "400":
+          description: Invalid input
+
+  /contact/inquiries:
+    get:
+      operationId: listInquiries
+      tags: [contact]
+      summary: List all contact inquiries
+      description: Returns all submitted contact inquiries for the sales manager
+      responses:
+        "200":
+          description: List of inquiries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ContactInquiry"
+
+  /properties:
+    get:
+      operationId: listProperties
+      tags: [properties]
+      summary: List all properties
+      description: Returns all available real estate properties
+      responses:
+        "200":
+          description: List of properties
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Property"
+
+  /properties/featured:
+    get:
+      operationId: getFeaturedProperties
+      tags: [properties]
+      summary: Get featured properties
+      description: Returns highlighted/featured properties for the hero section
+      responses:
+        "200":
+          description: Featured properties
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Property"
+
+  /properties/{id}:
+    get:
+      operationId: getProperty
+      tags: [properties]
+      summary: Get a single property
+      description: Returns details for a specific property
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Property detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Property"
+        "404":
+          description: Property not found
+
+components:
+  schemas:
+    HealthStatus:
+      type: object
+      properties:
+        status:
+          type: string
+      required:
+        - status
+
+    ContactInput:
+      type: object
+      required:
+        - fullName
+        - phone
+        - projectInterest
+      properties:
+        fullName:
+          type: string
+          minLength: 2
+        phone:
+          type: string
+          minLength: 9
+        email:
+          type: ["string", "null"]
+        projectInterest:
+          type: string
+        message:
+          type: ["string", "null"]
+
+    ContactResponse:
+      type: object
+      required:
+        - id
+        - message
+      properties:
+        id:
+          type: integer
+        message:
+          type: string
+
+    ContactInquiry:
+      type: object
+      required:
+        - id
+        - fullName
+        - phone
+        - projectInterest
+        - createdAt
+      properties:
+        id:
+          type: integer
+        fullName:
+          type: string
+        phone:
+          type: string
+        email:
+          type: ["string", "null"]
+        projectInterest:
+          type: string
+        message:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+
+    Property:
+      type: object
+      required:
+        - id
+        - name
+        - location
+        - price
+        - priceUnit
+        - type
+        - category
+        - imageUrl
+        - featured
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        location:
+          type: string
+        price:
+          type: number
+        priceUnit:
+          type: string
+        type:
+          type: string
+          description: "apartment | villa | townhouse | beachfront"
+        category:
+          type: string
+          description: "premium | mid-range"
+        bedrooms:
+          type: ["integer", "null"]
+        bathrooms:
+          type: ["integer", "null"]
+        area:
+          type: ["number", "null"]
+        imageUrl:
+          type: string
+        images:
+          type: array
+          items:
+            type: string
+        description:
+          type: ["string", "null"]
+        amenities:
+          type: array
+          items:
+            type: string
+        featured:
+          type: boolean
+        hasBalcony:
+          type: boolean
+        hasSeaView:
+          type: boolean
+        status:
+          type: string
+          description: "available | sold-out | coming-soon"
