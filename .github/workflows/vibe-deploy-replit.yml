@@ -1,0 +1,226 @@
+name: Vibe Deploy - Build and Deploy
+run-name: Vibe Deploy ${{ inputs.job_id }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      job_id:
+        description: Deployment job id
+        required: true
+        type: string
+      package_manager:
+        description: Package manager
+        required: true
+        type: string
+      package_manager_version:
+        description: Package manager version
+        required: false
+        type: string
+      install_cmd:
+        description: Dependency install command
+        required: true
+        type: string
+      build_cmd:
+        description: Build command
+        required: true
+        type: string
+      output_dir:
+        description: Build output directory
+        required: true
+        type: string
+      artifact_name:
+        description: Build artifact name
+        required: true
+        type: string
+      node_version:
+        description: Node version
+        required: true
+        type: string
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  npm_config_include_optional: "true"
+  NODE_OPTIONS: "--experimental-require-module"
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '${{ inputs.node_version }}'
+
+      - name: Prepare package manager
+        run: |
+          case "${{ inputs.package_manager }}" in
+            yarn)
+              corepack enable
+              corepack prepare yarn@stable --activate
+              ;;
+            pnpm)
+              corepack enable
+              corepack prepare "pnpm@${{ inputs.package_manager_version || '8' }}" --activate
+              ;;
+            bun)
+              curl -fsSL https://bun.sh/install | bash
+              echo "$HOME/.bun/bin" >> "$GITHUB_PATH"
+              ;;
+            *)
+              true
+              ;;
+          esac
+
+      - name: Prepare environment files
+        run: |
+          if [ ! -f ".env" ] && [ -f ".env.example" ]; then
+            cp .env.example .env
+          fi
+          if [ ! -f ".env.production" ] && [ -f ".env.example" ]; then
+            cp .env.example .env.production
+          fi
+
+      - name: Install dependencies
+        run: |
+          rm -rf node_modules
+          if [ "${{ inputs.package_manager }}" = "npm" ]; then
+            npm cache verify
+          fi
+          if [ "${{ inputs.package_manager }}" = "pnpm" ]; then
+            (${{ inputs.install_cmd }}) || pnpm install --no-frozen-lockfile
+          else
+            ${{ inputs.install_cmd }}
+          fi
+          if [ "${{ inputs.package_manager }}" = "npm" ]; then
+            npm install --no-save @tailwindcss/oxide-linux-x64-gnu --include=optional || true
+            npm rebuild @tailwindcss/oxide @tailwindcss/oxide-linux-x64-gnu || true
+          fi
+
+      - name: Build project
+        run: |
+          shopt -s nullglob
+
+          discover_frontend_packages() {
+            node <<'NODE'
+const fs = require('fs');
+const path = require('path');
+const root = process.cwd();
+const artifactsDir = path.join(root, 'artifacts');
+if (!fs.existsSync(artifactsDir)) process.exit(0);
+const markers = ['vite', 'react', 'react-dom', 'next', 'nuxt', 'astro', '@tanstack/react-start', '@tanstack/start', '@tanstack/router-plugin', '@lovable.dev/vite-tanstack-config', '@workspace/api-client-react'];
+const penaltyMarkers = ['sandbox', 'mock', 'demo', 'storybook', 'playground'];
+const rows = [];
+for (const name of fs.readdirSync(artifactsDir)) {
+  const dir = path.join(artifactsDir, name);
+  const pkgFile = path.join(dir, 'package.json');
+  if (!fs.existsSync(pkgFile)) continue;
+  let pkg;
+  try { pkg = JSON.parse(fs.readFileSync(pkgFile, 'utf8')); } catch { continue; }
+  if (!pkg.scripts || !pkg.scripts.build) continue;
+  const deps = { ...(pkg.dependencies || {}), ...(pkg.devDependencies || {}) };
+  let score = 0;
+  if (fs.existsSync(path.join(dir, 'vite.config.ts')) || fs.existsSync(path.join(dir, 'vite.config.js'))) score += 50;
+  if (fs.existsSync(path.join(dir, 'src'))) score += 20;
+  for (const marker of markers) {
+    if (deps[marker]) score += 15;
+  }
+  const text = `${name} ${pkg.name || ''}`.toLowerCase();
+  for (const marker of penaltyMarkers) {
+    if (text.includes(marker)) score -= 40;
+  }
+  rows.push({ name: pkg.name || name, dir: path.relative(root, dir), score });
+}
+rows.sort((a, b) => b.score - a.score || a.dir.localeCompare(b.dir));
+for (const row of rows) {
+  console.log(`${row.name}|${row.dir}`);
+}
+NODE
+          }
+
+          detect_output_dir() {
+            local base="$1"
+            shift
+            for candidate in "$@"; do
+              [ -n "$candidate" ] || continue
+              if [ -f "$base/$candidate/index.html" ]; then
+                printf '%s\n' "$candidate"
+                return 0
+              fi
+            done
+            return 1
+          }
+
+          mapfile -t FRONTEND_PACKAGES < <(discover_frontend_packages)
+          PRIMARY_OUTPUT="${{ inputs.output_dir }}"
+          DEPLOY_RELATIVE=""
+
+          set +e
+          ${{ inputs.build_cmd }}
+          PRIMARY_STATUS=$?
+          set -e
+
+          if DEPLOY_RELATIVE=$(detect_output_dir "$(pwd)" \
+            "$PRIMARY_OUTPUT" \
+            "$PRIMARY_OUTPUT/public" \
+            "dist/public" \
+            "dist" \
+            "build" \
+            "out" \
+            ".output/public" \
+            "public"); then
+            true
+          fi
+
+          if [ -z "$DEPLOY_RELATIVE" ] && [ "${{ inputs.package_manager }}" = "pnpm" ]; then
+            for entry in "${FRONTEND_PACKAGES[@]}"; do
+              PKG_NAME="${entry%%|*}"
+              PKG_DIR="${entry#*|}"
+              echo "Trying workspace frontend package: ${PKG_NAME}"
+              if pnpm --filter "${PKG_NAME}" --if-present run build; then
+                if DEPLOY_RELATIVE=$(detect_output_dir "$(pwd)" \
+                  "${PKG_DIR}/${PRIMARY_OUTPUT}" \
+                  "${PKG_DIR}/${PRIMARY_OUTPUT}/public" \
+                  "${PKG_DIR}/dist/public" \
+                  "${PKG_DIR}/dist" \
+                  "${PKG_DIR}/build" \
+                  "${PKG_DIR}/out" \
+                  "${PKG_DIR}/.output/public" \
+                  "${PKG_DIR}/public"); then
+                  break
+                fi
+              fi
+            done
+          fi
+
+          if [ -z "$DEPLOY_RELATIVE" ]; then
+            if [ "${PRIMARY_STATUS}" -ne 0 ]; then
+              exit "${PRIMARY_STATUS}"
+            fi
+            echo "Unable to determine deployable output directory."
+            exit 1
+          fi
+
+          echo "Selected deploy output: ${DEPLOY_RELATIVE}"
+          echo "DEPLOY_DIR=$(pwd)/${DEPLOY_RELATIVE}" >> "$GITHUB_ENV"
+          echo "DEPLOY_RELATIVE_DIR=${DEPLOY_RELATIVE}" >> "$GITHUB_ENV"
+        env:
+          NODE_ENV: production
+          CI: false
+
+      - name: Verify build output
+        run: |
+          test -n "${DEPLOY_DIR:-}" || (echo "Missing DEPLOY_DIR" && exit 1)
+          test -d "${DEPLOY_DIR}" || (echo "Missing build dir: ${DEPLOY_DIR}" && exit 1)
+          find "${DEPLOY_DIR}" -maxdepth 2 | head -50
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.artifact_name }}
+          path: ${{ env.DEPLOY_DIR }}/
+          if-no-files-found: error
+          retention-days: 1
