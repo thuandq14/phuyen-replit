@@ -101,20 +101,126 @@ jobs:
           fi
 
       - name: Build project
-        run: ${{ inputs.build_cmd }}
+        run: |
+          shopt -s nullglob
+
+          discover_frontend_packages() {
+            node <<'NODE'
+const fs = require('fs');
+const path = require('path');
+const root = process.cwd();
+const artifactsDir = path.join(root, 'artifacts');
+if (!fs.existsSync(artifactsDir)) process.exit(0);
+const markers = ['vite', 'react', 'react-dom', 'next', 'nuxt', 'astro', '@tanstack/react-start', '@tanstack/start', '@tanstack/router-plugin', '@lovable.dev/vite-tanstack-config', '@workspace/api-client-react'];
+const penaltyMarkers = ['sandbox', 'mock', 'demo', 'storybook', 'playground'];
+const rows = [];
+for (const name of fs.readdirSync(artifactsDir)) {
+  const dir = path.join(artifactsDir, name);
+  const pkgFile = path.join(dir, 'package.json');
+  if (!fs.existsSync(pkgFile)) continue;
+  let pkg;
+  try { pkg = JSON.parse(fs.readFileSync(pkgFile, 'utf8')); } catch { continue; }
+  if (!pkg.scripts || !pkg.scripts.build) continue;
+  const deps = { ...(pkg.dependencies || {}), ...(pkg.devDependencies || {}) };
+  let score = 0;
+  if (fs.existsSync(path.join(dir, 'vite.config.ts')) || fs.existsSync(path.join(dir, 'vite.config.js'))) score += 50;
+  if (fs.existsSync(path.join(dir, 'src'))) score += 20;
+  for (const marker of markers) {
+    if (deps[marker]) score += 15;
+  }
+  const text = `${name} ${pkg.name || ''}`.toLowerCase();
+  for (const marker of penaltyMarkers) {
+    if (text.includes(marker)) score -= 40;
+  }
+  rows.push({ name: pkg.name || name, dir: path.relative(root, dir), score });
+}
+rows.sort((a, b) => b.score - a.score || a.dir.localeCompare(b.dir));
+for (const row of rows) {
+  console.log(`${row.name}|${row.dir}`);
+}
+NODE
+          }
+
+          detect_output_dir() {
+            local base="$1"
+            shift
+            for candidate in "$@"; do
+              [ -n "$candidate" ] || continue
+              if [ -f "$base/$candidate/index.html" ]; then
+                printf '%s\n' "$candidate"
+                return 0
+              fi
+            done
+            return 1
+          }
+
+          mapfile -t FRONTEND_PACKAGES < <(discover_frontend_packages)
+          PRIMARY_OUTPUT="${{ inputs.output_dir }}"
+          DEPLOY_RELATIVE=""
+
+          set +e
+          ${{ inputs.build_cmd }}
+          PRIMARY_STATUS=$?
+          set -e
+
+          if DEPLOY_RELATIVE=$(detect_output_dir "$(pwd)" \
+            "$PRIMARY_OUTPUT" \
+            "$PRIMARY_OUTPUT/public" \
+            "dist/public" \
+            "dist" \
+            "build" \
+            "out" \
+            ".output/public" \
+            "public"); then
+            true
+          fi
+
+          if [ -z "$DEPLOY_RELATIVE" ] && [ "${{ inputs.package_manager }}" = "pnpm" ]; then
+            for entry in "${FRONTEND_PACKAGES[@]}"; do
+              PKG_NAME="${entry%%|*}"
+              PKG_DIR="${entry#*|}"
+              echo "Trying workspace frontend package: ${PKG_NAME}"
+              if pnpm --filter "${PKG_NAME}" --if-present run build; then
+                if DEPLOY_RELATIVE=$(detect_output_dir "$(pwd)" \
+                  "${PKG_DIR}/${PRIMARY_OUTPUT}" \
+                  "${PKG_DIR}/${PRIMARY_OUTPUT}/public" \
+                  "${PKG_DIR}/dist/public" \
+                  "${PKG_DIR}/dist" \
+                  "${PKG_DIR}/build" \
+                  "${PKG_DIR}/out" \
+                  "${PKG_DIR}/.output/public" \
+                  "${PKG_DIR}/public"); then
+                  break
+                fi
+              fi
+            done
+          fi
+
+          if [ -z "$DEPLOY_RELATIVE" ]; then
+            if [ "${PRIMARY_STATUS}" -ne 0 ]; then
+              exit "${PRIMARY_STATUS}"
+            fi
+            echo "Unable to determine deployable output directory."
+            exit 1
+          fi
+
+          echo "Selected deploy output: ${DEPLOY_RELATIVE}"
+          echo "DEPLOY_DIR=$(pwd)/${DEPLOY_RELATIVE}" >> "$GITHUB_ENV"
+          echo "DEPLOY_RELATIVE_DIR=${DEPLOY_RELATIVE}" >> "$GITHUB_ENV"
         env:
           NODE_ENV: production
           CI: false
 
       - name: Verify build output
         run: |
-          test -d "${{ inputs.output_dir }}" || (echo "Missing build dir: ${{ inputs.output_dir }}" && exit 1)
-          find "${{ inputs.output_dir }}" -maxdepth 2 | head -50
+          test -n "${DEPLOY_DIR:-}" || (echo "Missing DEPLOY_DIR" && exit 1)
+          test -d "${DEPLOY_DIR}" || (echo "Missing build dir: ${DEPLOY_DIR}" && exit 1)
+          find "${DEPLOY_DIR}" -maxdepth 2 | head -50
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ inputs.artifact_name }}
-          path: ./${{ inputs.output_dir }}/
+          path: ${{ env.DEPLOY_DIR }}/
           if-no-files-found: error
           retention-days: 1
